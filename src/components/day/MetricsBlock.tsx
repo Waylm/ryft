@@ -1,12 +1,12 @@
-import { useState } from 'react';
-import { View, Pressable } from 'react-native';
+import { useEffect, useState } from 'react';
+import { View, Pressable, ScrollView } from 'react-native';
 import type { SQLiteDatabase } from 'expo-sqlite';
 import { Feather } from '@expo/vector-icons';
 import { Mono, Serif } from '@/components/Typography';
 import { SectionLabel } from '@/components/SectionLabel';
 import { useTheme } from '@/theme';
 import type { Metric } from '@/db/types';
-import { addMetric, deleteMetric, updateMetric } from '@/db/queries';
+import { addMetric, deleteMetric, listMetricKeys, updateMetric } from '@/db/queries';
 import { MetricEditorModal, type MetricDraft } from './MetricEditorModal';
 
 export function MetricsBlock({
@@ -20,16 +20,32 @@ export function MetricsBlock({
   db: SQLiteDatabase;
   onChange: () => void;
 }) {
-  const { colors, spacing, fontSize } = useTheme();
+  const { colors, spacing, fontSize, radius } = useTheme();
   const [editing, setEditing] = useState<Metric | null>(null);
+  const [preset, setPreset] = useState<{ label: string; unit: string } | null>(null);
   const [open, setOpen] = useState(false);
+  const [suggestions, setSuggestions] = useState<{ key: string; label: string; unit: string }[]>([]);
+
+  useEffect(() => {
+    listMetricKeys(db).then(setSuggestions);
+  }, [db, metrics.length]);
+
+  const usedKeys = new Set(metrics.map((m) => m.key));
+  const freshSuggestions = suggestions.filter((s) => !usedKeys.has(s.key)).slice(0, 6);
 
   const openNew = () => {
     setEditing(null);
+    setPreset(null);
+    setOpen(true);
+  };
+  const openPreset = (s: { label: string; unit: string }) => {
+    setEditing(null);
+    setPreset(s);
     setOpen(true);
   };
   const openEdit = (m: Metric) => {
     setEditing(m);
+    setPreset(null);
     setOpen(true);
   };
 
@@ -105,9 +121,41 @@ export function MetricsBlock({
         </View>
       )}
 
+      {freshSuggestions.length > 0 ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ gap: spacing.sm }}
+          style={{ marginTop: spacing.md }}
+        >
+          {freshSuggestions.map((s) => (
+            <Pressable
+              key={s.key}
+              onPress={() => openPreset(s)}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+                borderWidth: 1,
+                borderColor: colors.dim,
+                borderRadius: radius.md,
+                paddingVertical: 6,
+                paddingHorizontal: spacing.md,
+              }}
+            >
+              <Feather name="plus" size={11} color={colors.muted} />
+              <Mono size={fontSize.tiny} color={colors.mid}>
+                {s.label}
+              </Mono>
+            </Pressable>
+          ))}
+        </ScrollView>
+      ) : null}
+
       <MetricEditorModal
         visible={open}
         initial={editing}
+        preset={preset}
         onSubmit={submit}
         onDelete={editing ? remove : undefined}
         onClose={() => setOpen(false)}

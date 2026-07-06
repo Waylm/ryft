@@ -8,6 +8,7 @@ import {
   listFocusBlocks,
   listMetrics,
   listPhotos,
+  listTemplateItems,
 } from '@/db/queries';
 import type { Checklist, Day, FocusBlock, Metric, Photo, TextSection } from '@/db/types';
 
@@ -19,6 +20,9 @@ export interface DayData {
   focusBlocks: FocusBlock[];
   metrics: Metric[];
   photos: Photo[];
+  /** Whether to show the Metrics / Photos sections (template toggle, or data exists). */
+  showMetrics: boolean;
+  showPhotos: boolean;
   loading: boolean;
   reload: () => Promise<void>;
   setDay: (day: Day) => void;
@@ -33,23 +37,31 @@ export function useDayData(date: string): DayData {
   const [focusBlocks, setFocusBlocks] = useState<FocusBlock[]>([]);
   const [metrics, setMetrics] = useState<Metric[]>([]);
   const [photos, setPhotos] = useState<Photo[]>([]);
+  const [showMetrics, setShowMetrics] = useState(true);
+  const [showPhotos, setShowPhotos] = useState(true);
   const [loading, setLoading] = useState(true);
 
   const reload = useCallback(async () => {
     const d = await getOrCreateDay(db, date);
-    const [c, s, f, m, p] = await Promise.all([
+    const [c, s, f, m, p, template] = await Promise.all([
       listChecklists(db, d.id),
       listTextSections(db, d.id),
       listFocusBlocks(db, d.id),
       listMetrics(db, d.id),
       listPhotos(db, d.id),
+      listTemplateItems(db),
     ]);
+    const metricsEnabled = template.some((t) => t.type === 'metrics' && t.enabled);
+    const photosEnabled = template.some((t) => t.type === 'photos' && t.enabled);
     setDay(d);
     setChecklists(c);
     setSections(s);
     setFocusBlocks(f);
     setMetrics(m);
     setPhotos(p);
+    // Always show a section that already has data, so toggling off never hides logged work.
+    setShowMetrics(metricsEnabled || m.length > 0);
+    setShowPhotos(photosEnabled || p.length > 0);
     setLoading(false);
   }, [db, date]);
 
@@ -58,5 +70,18 @@ export function useDayData(date: string): DayData {
     reload();
   }, [reload]);
 
-  return { db, day, checklists, sections, focusBlocks, metrics, photos, loading, reload, setDay };
+  return {
+    db,
+    day,
+    checklists,
+    sections,
+    focusBlocks,
+    metrics,
+    photos,
+    showMetrics,
+    showPhotos,
+    loading,
+    reload,
+    setDay,
+  };
 }

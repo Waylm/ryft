@@ -22,12 +22,14 @@ export function normalizeKey(label: string): string {
 export function MetricEditorModal({
   visible,
   initial,
+  preset,
   onSubmit,
   onDelete,
   onClose,
 }: {
   visible: boolean;
   initial: Metric | null;
+  preset?: { label: string; unit: string } | null;
   onSubmit: (draft: MetricDraft) => void;
   onDelete?: () => void;
   onClose: () => void;
@@ -39,11 +41,11 @@ export function MetricEditorModal({
 
   useEffect(() => {
     if (visible) {
-      setLabel(initial?.label ?? '');
+      setLabel(initial?.label ?? preset?.label ?? '');
       setValue(initial ? String(initial.value) : '');
-      setUnit(initial?.unit ?? '');
+      setUnit(initial?.unit ?? preset?.unit ?? '');
     }
-  }, [visible, initial]);
+  }, [visible, initial, preset]);
 
   const numeric = parseFloat(value.replace(',', '.'));
   const valid = label.trim().length > 0 && !Number.isNaN(numeric);

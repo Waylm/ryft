@@ -109,18 +109,27 @@ const MIGRATIONS: string[] = [
     position       INTEGER NOT NULL DEFAULT 0
   );
   `,
-];
+  // v3 — user-configurable journal template + list-kind checklists (Executed)
+  `
+  ALTER TABLE checklists ADD COLUMN kind TEXT NOT NULL DEFAULT 'check';
 
-/**
- * The default day skeleton, mirroring journal-d1.html: a skincare checklist,
- * Ideas + Executed text sections, and a Workout focus block. Seeded on the
- * first open of a new day so pages feel complete out of the box.
- */
-export const DEFAULT_DAY_TEMPLATE = {
-  checklists: ['Skincare'],
-  sections: ['Ideas', 'Executed'],
-  focus: ['Workout'],
-} as const;
+  CREATE TABLE template_items (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    type     TEXT NOT NULL,
+    label    TEXT NOT NULL,
+    enabled  INTEGER NOT NULL DEFAULT 1,
+    position INTEGER NOT NULL DEFAULT 0
+  );
+
+  INSERT INTO template_items (type, label, enabled, position) VALUES
+    ('checklist', 'Skincare', 1, 0),
+    ('text',      'Ideas',    1, 1),
+    ('list',      'Executed', 1, 2),
+    ('focus',     'Workout',  1, 3),
+    ('metrics',   'Metrics',  1, 4),
+    ('photos',    'Photos',   1, 5);
+  `,
+];
 
 /** The "prime hood" starter pack — hard-hitting lines that ship with the app. */
 export const DEFAULT_REMINDER_MESSAGES = [

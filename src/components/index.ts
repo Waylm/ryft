@@ -5,3 +5,4 @@ export { Pill } from './Pill';
 export { Button } from './Button';
 export { EmptyBlock } from './EmptyBlock';
 export { Spine, MiniSpine } from './Spine';
+export { Toggle } from './Toggle';

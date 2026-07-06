@@ -5,7 +5,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 
-import { Mono, Serif, Button } from '@/components';
+import { Mono, Serif, Button, Toggle } from '@/components';
 import { SectionLabel } from '@/components/SectionLabel';
 import { PromptModal } from '@/components/PromptModal';
 import { ReminderEditorModal, type ReminderDraft } from '@/components/reminders/ReminderEditorModal';
@@ -287,36 +287,6 @@ export default function RemindersScreen() {
         onClose={() => setAddLineOpen(false)}
       />
     </View>
-  );
-}
-
-function Toggle({ on, onPress }: { on: boolean; onPress: () => void }) {
-  const { colors } = useTheme();
-  return (
-    <Pressable
-      onPress={onPress}
-      hitSlop={8}
-      style={{
-        width: 44,
-        height: 26,
-        borderRadius: 13,
-        padding: 3,
-        backgroundColor: on ? colors.accent : colors.surfaceAlt,
-        borderWidth: 1,
-        borderColor: on ? colors.accent : colors.dim,
-        alignItems: on ? 'flex-end' : 'flex-start',
-        justifyContent: 'center',
-      }}
-    >
-      <View
-        style={{
-          width: 18,
-          height: 18,
-          borderRadius: 9,
-          backgroundColor: on ? colors.onAccent : colors.mid,
-        }}
-      />
-    </Pressable>
   );
 }
 

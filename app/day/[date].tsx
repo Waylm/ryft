@@ -21,7 +21,7 @@ import { todayISO, weekdayLong, formatSlashDate, isToday, relativeLabel } from '
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-type AddKind = 'checklist' | 'text' | 'focus' | null;
+type AddKind = 'checklist' | 'text' | 'list' | 'focus' | null;
 
 export default function DayScreen() {
   const theme = useTheme();
@@ -32,7 +32,8 @@ export default function DayScreen() {
   const date = DATE_RE.test(params.date ?? '') ? params.date : todayISO();
 
   const data = useDayData(date);
-  const { db, day, checklists, sections, focusBlocks, metrics, photos } = data;
+  const { db, day, checklists, sections, focusBlocks, metrics, photos, showMetrics, showPhotos } =
+    data;
 
   const [note, setNote] = useState('');
   const noteDirty = useRef(false);
@@ -77,6 +78,7 @@ export default function DayScreen() {
   const submitAdd = async (label: string) => {
     if (!day) return;
     if (addKind === 'checklist') await addChecklist(db, day.id, label);
+    else if (addKind === 'list') await addChecklist(db, day.id, label, 'list');
     else if (addKind === 'text') await addTextSection(db, day.id, label);
     else if (addKind === 'focus') await addFocusBlock(db, day.id, label);
     setAddKind(null);
@@ -84,6 +86,25 @@ export default function DayScreen() {
   };
 
   const spineSegments = buildDaySpine({ checklists, sections, focusBlocks, metrics, photos });
+
+  // Merge the seeded block types into one list ordered by their global position.
+  const orderedBlocks = [
+    ...checklists.map((c) => ({
+      key: `c${c.id}`,
+      position: c.position,
+      node: <ChecklistBlock key={`c${c.id}`} checklist={c} db={db} onChange={data.reload} />,
+    })),
+    ...sections.map((s) => ({
+      key: `s${s.id}`,
+      position: s.position,
+      node: <TextSectionBlock key={`s${s.id}`} section={s} db={db} onChange={data.reload} />,
+    })),
+    ...focusBlocks.map((f) => ({
+      key: `f${f.id}`,
+      position: f.position,
+      node: <FocusBlock key={`f${f.id}`} block={f} db={db} onChange={data.reload} />,
+    })),
+  ].sort((a, b) => a.position - b.position);
 
   // Build a lightweight summary just for the status pill.
   const sectionCount = sections.filter((s) => s.content.trim()).length;
@@ -183,19 +204,11 @@ export default function DayScreen() {
         <View style={{ flexDirection: 'row', gap: spacing.xl }}>
           <Spine segments={spineSegments} minSegmentHeight={44} />
           <View style={{ flex: 1 }}>
-            {checklists.map((c) => (
-              <ChecklistBlock key={`c${c.id}`} checklist={c} db={db} onChange={data.reload} />
-            ))}
-            {sections.map((s) => (
-              <TextSectionBlock key={`s${s.id}`} section={s} db={db} onChange={data.reload} />
-            ))}
-            {focusBlocks.map((f) => (
-              <FocusBlock key={`f${f.id}`} block={f} db={db} onChange={data.reload} />
-            ))}
-            {day ? (
+            {orderedBlocks.map((b) => b.node)}
+            {day && showMetrics ? (
               <MetricsBlock dayId={day.id} metrics={metrics} db={db} onChange={data.reload} />
             ) : null}
-            {day ? (
+            {day && showPhotos ? (
               <PhotosBlock dayId={day.id} photos={photos} db={db} onChange={data.reload} />
             ) : null}
           </View>
@@ -211,6 +224,7 @@ export default function DayScreen() {
           }}
         >
           <AddChip icon="check-square" label="Checklist" onPress={() => setAddKind('checklist')} />
+          <AddChip icon="list" label="List" onPress={() => setAddKind('list')} />
           <AddChip icon="align-left" label="Text" onPress={() => setAddKind('text')} />
           <AddChip icon="target" label="Focus" onPress={() => setAddKind('focus')} />
         </View>
@@ -221,16 +235,20 @@ export default function DayScreen() {
         title={
           addKind === 'checklist'
             ? 'New checklist'
-            : addKind === 'focus'
-              ? 'New focus'
-              : 'New text section'
+            : addKind === 'list'
+              ? 'New list'
+              : addKind === 'focus'
+                ? 'New focus'
+                : 'New text section'
         }
         placeholder={
           addKind === 'checklist'
             ? 'Skincare, Morning routine…'
-            : addKind === 'focus'
-              ? 'Workout, Study…'
-              : 'Ideas, Executed…'
+            : addKind === 'list'
+              ? 'Executed, Wins…'
+              : addKind === 'focus'
+                ? 'Workout, Study…'
+                : 'Ideas…'
         }
         onSubmit={submitAdd}
         onClose={() => setAddKind(null)}

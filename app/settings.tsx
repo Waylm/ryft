@@ -5,6 +5,7 @@ import { Feather } from '@expo/vector-icons';
 
 import { Mono, Serif } from '@/components';
 import { SectionLabel } from '@/components/SectionLabel';
+import { JournalTemplateEditor } from '@/components/settings/JournalTemplateEditor';
 import { useTheme, useThemePreference, type ThemePreference } from '@/theme';
 
 const OPTIONS: { key: ThemePreference; label: string }[] = [
@@ -82,34 +83,23 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* Journal template */}
+        <JournalTemplateEditor />
+
         {/* About */}
         <View style={{ marginTop: spacing.xxl }}>
           <SectionLabel>About</SectionLabel>
           <Serif size={fontSize.lg} color={colors.bright}>
             Ryft
           </Serif>
-          <Serif italic size={fontSize.body} color={colors.text} style={{ marginTop: spacing.sm, lineHeight: fontSize.body * 1.5 }}>
+          <Mono size={fontSize.tiny} color={colors.muted} tracking={1} style={{ marginTop: 4 }}>
+            A Waylm Labs project
+          </Mono>
+          <Serif italic size={fontSize.body} color={colors.text} style={{ marginTop: spacing.md, lineHeight: fontSize.body * 1.5 }}>
             A journal for closing the gap between you and your prime. Local-first, open source, free.
           </Serif>
-
-          <View
-            style={{
-              marginTop: spacing.xl,
-              paddingTop: spacing.lg,
-              borderTopWidth: 1,
-              borderTopColor: colors.line,
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: spacing.sm,
-            }}
-          >
-            <View style={{ width: 20, height: 3, backgroundColor: colors.accent, borderRadius: 2 }} />
-            <Mono size={fontSize.tiny} weight="bold" tracking={2.5} upper color={colors.bright}>
-              Waylm Labs
-            </Mono>
-          </View>
-          <Mono size={fontSize.micro} color={colors.muted} tracking={1} style={{ marginTop: spacing.sm }}>
-            Made by Waylm Labs · v0.1.0 · your data lives on this device
+          <Mono size={fontSize.micro} color={colors.muted} tracking={1} style={{ marginTop: spacing.lg }}>
+            v0.1.0 · your data lives on this device
           </Mono>
         </View>
       </ScrollView>

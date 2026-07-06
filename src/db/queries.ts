@@ -2,6 +2,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 import type {
   Checklist,
   ChecklistItem,
+  ChecklistKind,
   Day,
   DaySummary,
   FocusArea,
@@ -12,9 +13,10 @@ import type {
   Photo,
   Reminder,
   ReminderMessage,
+  TemplateItem,
+  TemplateItemType,
   TextSection,
 } from './types';
-import { DEFAULT_DAY_TEMPLATE } from './database';
 
 const now = () => Date.now();
 
@@ -99,36 +101,56 @@ export async function getOrCreateDay(db: SQLiteDatabase, date: string): Promise<
   return created;
 }
 
-/** Populate a freshly created day with the default template blocks. */
+/**
+ * Populate a freshly created day from the user's journal template. Positions
+ * are assigned globally (across block types) so the day renders in template
+ * order. Metrics/photos are visibility toggles, not seeded blocks.
+ */
 async function seedDefaultBlocks(db: SQLiteDatabase, dayId: number): Promise<void> {
+  const items = await listTemplateItems(db);
   let pos = 0;
-  for (const label of DEFAULT_DAY_TEMPLATE.checklists) {
-    await db.runAsync(
-      'INSERT INTO checklists (day_id, label, position) VALUES (?, ?, ?)',
-      dayId,
-      label,
-      pos++
-    );
+  for (const it of items) {
+    if (!it.enabled) continue;
+    if (it.type === 'checklist' || it.type === 'list') {
+      await db.runAsync(
+        'INSERT INTO checklists (day_id, label, kind, position) VALUES (?, ?, ?, ?)',
+        dayId,
+        it.label,
+        it.type === 'list' ? 'list' : 'check',
+        pos++
+      );
+    } else if (it.type === 'text') {
+      await db.runAsync(
+        'INSERT INTO text_sections (day_id, label, content, position) VALUES (?, ?, ?, ?)',
+        dayId,
+        it.label,
+        '',
+        pos++
+      );
+    } else if (it.type === 'focus') {
+      await db.runAsync(
+        'INSERT INTO focus_blocks (day_id, label, position) VALUES (?, ?, ?)',
+        dayId,
+        it.label,
+        pos++
+      );
+    }
   }
-  pos = 0;
-  for (const label of DEFAULT_DAY_TEMPLATE.sections) {
-    await db.runAsync(
-      'INSERT INTO text_sections (day_id, label, content, position) VALUES (?, ?, ?, ?)',
-      dayId,
-      label,
-      '',
-      pos++
-    );
-  }
-  pos = 0;
-  for (const label of DEFAULT_DAY_TEMPLATE.focus) {
-    await db.runAsync(
-      'INSERT INTO focus_blocks (day_id, label, position) VALUES (?, ?, ?)',
-      dayId,
-      label,
-      pos++
-    );
-  }
+}
+
+/** Next global block position for a day, across checklists/text/focus. */
+async function nextDayBlockPosition(db: SQLiteDatabase, dayId: number): Promise<number> {
+  const row = await db.getFirstAsync<{ p: number | null }>(
+    `SELECT MAX(p) AS p FROM (
+       SELECT MAX(position) AS p FROM checklists     WHERE day_id = ?
+       UNION ALL SELECT MAX(position) FROM text_sections WHERE day_id = ?
+       UNION ALL SELECT MAX(position) FROM focus_blocks  WHERE day_id = ?
+     )`,
+    dayId,
+    dayId,
+    dayId
+  );
+  return (row?.p ?? -1) + 1;
 }
 
 export async function touchDay(db: SQLiteDatabase, id: number): Promise<void> {
@@ -287,7 +309,7 @@ export async function addTextSection(
   label: string,
   content = ''
 ): Promise<number> {
-  const pos = await nextPosition(db, 'text_sections', dayId);
+  const pos = await nextDayBlockPosition(db, dayId);
   const res = await db.runAsync(
     'INSERT INTO text_sections (day_id, label, content, position) VALUES (?, ?, ?, ?)',
     dayId,
@@ -332,6 +354,7 @@ export async function listChecklists(db: SQLiteDatabase, dayId: number): Promise
     id: number;
     day_id: number;
     label: string;
+    kind: string;
     position: number;
   }>('SELECT * FROM checklists WHERE day_id = ? ORDER BY position, id', dayId);
   if (lists.length === 0) return [];
@@ -363,6 +386,7 @@ export async function listChecklists(db: SQLiteDatabase, dayId: number): Promise
     id: l.id,
     dayId: l.day_id,
     label: l.label,
+    kind: l.kind === 'list' ? 'list' : 'check',
     position: l.position,
     items: byList.get(l.id) ?? [],
   }));
@@ -371,13 +395,15 @@ export async function listChecklists(db: SQLiteDatabase, dayId: number): Promise
 export async function addChecklist(
   db: SQLiteDatabase,
   dayId: number,
-  label: string
+  label: string,
+  kind: ChecklistKind = 'check'
 ): Promise<number> {
-  const pos = await nextPosition(db, 'checklists', dayId);
+  const pos = await nextDayBlockPosition(db, dayId);
   const res = await db.runAsync(
-    'INSERT INTO checklists (day_id, label, position) VALUES (?, ?, ?)',
+    'INSERT INTO checklists (day_id, label, kind, position) VALUES (?, ?, ?, ?)',
     dayId,
     label,
+    kind,
     pos
   );
   await touchDay(db, dayId);
@@ -485,7 +511,7 @@ export async function addFocusBlock(
   dayId: number,
   label: string
 ): Promise<number> {
-  const pos = await nextPosition(db, 'focus_blocks', dayId);
+  const pos = await nextDayBlockPosition(db, dayId);
   const res = await db.runAsync(
     'INSERT INTO focus_blocks (day_id, label, position) VALUES (?, ?, ?)',
     dayId,
@@ -898,6 +924,69 @@ export async function addReminderMessage(db: SQLiteDatabase, text: string): Prom
 
 export async function deleteReminderMessage(db: SQLiteDatabase, id: number): Promise<void> {
   await db.runAsync('DELETE FROM reminder_messages WHERE id = ? AND is_custom = 1', id);
+}
+
+// ---------------------------------------------------------------------------
+// Journal template
+// ---------------------------------------------------------------------------
+
+export async function listTemplateItems(db: SQLiteDatabase): Promise<TemplateItem[]> {
+  const rows = await db.getAllAsync<{
+    id: number;
+    type: string;
+    label: string;
+    enabled: number;
+    position: number;
+  }>('SELECT * FROM template_items ORDER BY position, id');
+  return rows.map((r) => ({
+    id: r.id,
+    type: r.type as TemplateItemType,
+    label: r.label,
+    enabled: !!r.enabled,
+    position: r.position,
+  }));
+}
+
+export async function addTemplateItem(
+  db: SQLiteDatabase,
+  type: TemplateItemType,
+  label: string
+): Promise<number> {
+  const row = await db.getFirstAsync<{ p: number | null }>(
+    'SELECT MAX(position) AS p FROM template_items'
+  );
+  const pos = (row?.p ?? -1) + 1;
+  const res = await db.runAsync(
+    'INSERT INTO template_items (type, label, enabled, position) VALUES (?, ?, 1, ?)',
+    type,
+    label,
+    pos
+  );
+  return res.lastInsertRowId;
+}
+
+export async function updateTemplateItem(
+  db: SQLiteDatabase,
+  id: number,
+  fields: { label?: string; enabled?: boolean }
+): Promise<void> {
+  const sets: string[] = [];
+  const args: (string | number)[] = [];
+  if (fields.label !== undefined) {
+    sets.push('label = ?');
+    args.push(fields.label);
+  }
+  if (fields.enabled !== undefined) {
+    sets.push('enabled = ?');
+    args.push(fields.enabled ? 1 : 0);
+  }
+  if (sets.length === 0) return;
+  args.push(id);
+  await db.runAsync(`UPDATE template_items SET ${sets.join(', ')} WHERE id = ?`, ...args);
+}
+
+export async function deleteTemplateItem(db: SQLiteDatabase, id: number): Promise<void> {
+  await db.runAsync('DELETE FROM template_items WHERE id = ?', id);
 }
 
 // ---------------------------------------------------------------------------

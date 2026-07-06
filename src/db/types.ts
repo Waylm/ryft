@@ -26,12 +26,27 @@ export interface ChecklistItem {
   position: number;
 }
 
+/** 'check' = tickable checklist (Skincare); 'list' = plain bulleted log (Executed). */
+export type ChecklistKind = 'check' | 'list';
+
 export interface Checklist {
   id: number;
   dayId: number;
   label: string;
+  kind: ChecklistKind;
   position: number;
   items: ChecklistItem[];
+}
+
+/** One entry in the user's journal template — what new days are seeded with. */
+export type TemplateItemType = 'checklist' | 'text' | 'list' | 'focus' | 'metrics' | 'photos';
+
+export interface TemplateItem {
+  id: number;
+  type: TemplateItemType;
+  label: string;
+  enabled: boolean;
+  position: number;
 }
 
 /** Intensity a focus area got that day: 1 = light, 2 = solid, 3 = heavy. */
