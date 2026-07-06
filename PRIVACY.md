@@ -72,6 +72,6 @@ revised version at this URL.
 
 ## Contact
 
-Questions about this policy? Contact us at **[YOUR SUPPORT EMAIL]**.
+Questions about this policy? Contact us at **policy@waylm.net**.
 
 WAYLM INC · 5830 E 2nd St, Pmb 7000, Casper, WY 82609-4308, United States
