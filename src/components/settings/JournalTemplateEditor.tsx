@@ -46,8 +46,9 @@ export function JournalTemplateEditor() {
   };
 
   const submitRename = async (label: string) => {
-    if (renaming) await updateTemplateItem(db, renaming.id, { label });
+    const item = renaming;
     setRenaming(null);
+    if (item) await updateTemplateItem(db, item.id, { label });
     load();
   };
 
@@ -66,8 +67,9 @@ export function JournalTemplateEditor() {
   };
 
   const add = async (type: TemplateItemType, label: string) => {
-    await addTemplateItem(db, type, label);
+    // Close synchronously first so a fast double-tap can't insert twice.
     setAddOpen(false);
+    await addTemplateItem(db, type, label);
     load();
   };
 

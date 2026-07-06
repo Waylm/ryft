@@ -8,10 +8,25 @@ import { Feather } from '@expo/vector-icons';
 import { Mono, Serif } from '@/components';
 import { SectionLabel } from '@/components/SectionLabel';
 import { useTheme } from '@/theme';
-import { getMetricStats, listPrimeDays } from '@/db/queries';
+import {
+  getMetricStats,
+  listPrimeDays,
+  getStreakStats,
+  getOutputStat,
+  getAdherenceRows,
+} from '@/db/queries';
 import type { Day, MetricStat } from '@/db/types';
-import { comparePrime, primeHeadline, primeLine, type PrimeComparison } from '@/lib/prime';
-import { formatSlashDate, relativeLabel, weekdayShort } from '@/lib/date';
+import {
+  comparePrime,
+  primeLine,
+  overallHeadline,
+  buildStreakDimension,
+  buildOutputDimension,
+  buildAdherenceDimension,
+  type PrimeComparison,
+  type PrimeDimension,
+} from '@/lib/prime';
+import { formatSlashDate, relativeLabel, weekdayShort, todayISO } from '@/lib/date';
 
 export default function PrimeScreen() {
   const theme = useTheme();
@@ -22,18 +37,33 @@ export default function PrimeScreen() {
 
   const [stats, setStats] = useState<MetricStat[]>([]);
   const [primeDays, setPrimeDays] = useState<Day[]>([]);
+  const [dimensions, setDimensions] = useState<PrimeDimension[]>([]);
 
   useFocusEffect(
     useCallback(() => {
-      Promise.all([getMetricStats(db), listPrimeDays(db)]).then(([s, d]) => {
+      const today = todayISO();
+      Promise.all([
+        getMetricStats(db),
+        listPrimeDays(db),
+        getStreakStats(db, today),
+        getOutputStat(db),
+        getAdherenceRows(db),
+      ]).then(([s, d, streak, output, adherence]) => {
         setStats(s);
         setPrimeDays(d);
+        setDimensions(
+          [
+            buildStreakDimension(streak),
+            buildOutputDimension(output),
+            buildAdherenceDimension(adherence),
+          ].filter((x): x is PrimeDimension => x !== null)
+        );
       });
     }, [db])
   );
 
   const comparisons = stats.map(comparePrime);
-  const headline = primeHeadline(comparisons);
+  const headline = overallHeadline(comparisons, dimensions);
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
@@ -63,6 +93,18 @@ export default function PrimeScreen() {
         >
           {headline}
         </Serif>
+
+        {/* Signals — prime beyond numeric metrics */}
+        {dimensions.length > 0 ? (
+          <View style={{ marginTop: spacing.xxl }}>
+            <SectionLabel>Signals</SectionLabel>
+            <View style={{ gap: spacing.lg }}>
+              {dimensions.map((d) => (
+                <DimensionCard key={d.key} d={d} />
+              ))}
+            </View>
+          </View>
+        ) : null}
 
         {/* Metric comparisons */}
         <View style={{ marginTop: spacing.xxl }}>
@@ -129,6 +171,60 @@ export default function PrimeScreen() {
           )}
         </View>
       </ScrollView>
+    </View>
+  );
+}
+
+function DimensionCard({ d }: { d: PrimeDimension }) {
+  const { colors, spacing, fontSize, radius } = useTheme();
+  return (
+    <View
+      style={{
+        backgroundColor: colors.surface,
+        borderWidth: 1,
+        borderColor: colors.line,
+        borderLeftWidth: 3,
+        borderLeftColor: d.atPrime ? colors.accent : colors.dim,
+        borderRadius: radius.md,
+        padding: spacing.lg,
+        gap: spacing.md,
+      }}
+    >
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
+        <Mono size={fontSize.label} weight="semibold" color={colors.bright}>
+          {d.label}
+        </Mono>
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
+          <Serif size={fontSize.xl} color={colors.bright}>
+            {d.current}
+          </Serif>
+          {d.unit ? (
+            <Mono size={fontSize.tiny} color={colors.mid}>
+              {d.unit}
+            </Mono>
+          ) : null}
+        </View>
+      </View>
+
+      <View style={{ height: 4, backgroundColor: colors.surfaceAlt, borderRadius: 2 }}>
+        <View
+          style={{
+            width: `${Math.round(d.ratio * 100)}%`,
+            height: 4,
+            backgroundColor: d.atPrime ? colors.accent : colors.mid,
+            borderRadius: 2,
+          }}
+        />
+      </View>
+
+      <Mono size={fontSize.tiny} color={colors.mid}>
+        {d.line}
+      </Mono>
+      {d.caption ? (
+        <Mono size={fontSize.micro} color={colors.muted} tracking={0.5}>
+          {d.caption}
+        </Mono>
+      ) : null}
     </View>
   );
 }

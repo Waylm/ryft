@@ -77,11 +77,13 @@ export default function DayScreen() {
 
   const submitAdd = async (label: string) => {
     if (!day) return;
-    if (addKind === 'checklist') await addChecklist(db, day.id, label);
-    else if (addKind === 'list') await addChecklist(db, day.id, label, 'list');
-    else if (addKind === 'text') await addTextSection(db, day.id, label);
-    else if (addKind === 'focus') await addFocusBlock(db, day.id, label);
+    // Close synchronously first so a fast double-tap can't insert twice.
+    const kind = addKind;
     setAddKind(null);
+    if (kind === 'checklist') await addChecklist(db, day.id, label);
+    else if (kind === 'list') await addChecklist(db, day.id, label, 'list');
+    else if (kind === 'text') await addTextSection(db, day.id, label);
+    else if (kind === 'focus') await addFocusBlock(db, day.id, label);
     data.reload();
   };
 
@@ -214,20 +216,23 @@ export default function DayScreen() {
           </View>
         </View>
 
-        {/* Add block */}
-        <View
-          style={{
-            flexDirection: 'row',
+        {/* Add block — horizontally scrollable so chips never overflow */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          style={{ marginTop: spacing.md }}
+          contentContainerStyle={{
             gap: spacing.md,
-            marginTop: spacing.md,
             paddingLeft: 3 + spacing.xl,
+            paddingRight: spacing.xl,
           }}
         >
           <AddChip icon="check-square" label="Checklist" onPress={() => setAddKind('checklist')} />
           <AddChip icon="list" label="List" onPress={() => setAddKind('list')} />
           <AddChip icon="align-left" label="Text" onPress={() => setAddKind('text')} />
           <AddChip icon="target" label="Focus" onPress={() => setAddKind('focus')} />
-        </View>
+        </ScrollView>
       </ScrollView>
 
       <PromptModal

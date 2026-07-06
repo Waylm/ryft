@@ -125,3 +125,29 @@ export interface MetricStat {
   latestDate: string;
   entryCount: number;
 }
+
+/** Consistency stats — current vs all-time-longest streak of active days. */
+export interface StreakStats {
+  current: number;
+  longest: number;
+  longestEndDate: string | null;
+  activeDayCount: number;
+}
+
+/** Daily-output stats — peak single-day executedCount vs recent output average. */
+export interface OutputStat {
+  peak: number;
+  peakDate: string | null;
+  recentAvg: number;
+  recentDays: number;
+  mostRecentExecuted: number;
+  mostRecentDate: string | null;
+  outputDayCount: number;
+}
+
+/** Per-day checklist follow-through (check-kind only) for the discipline dimension. */
+export interface AdherenceRow {
+  date: string;
+  done: number;
+  total: number;
+}

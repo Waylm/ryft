@@ -181,10 +181,14 @@ export async function migrateDatabase(db: SQLiteDatabase): Promise<void> {
   for (let i = version; i < MIGRATIONS.length; i++) {
     await db.withTransactionAsync(async () => {
       await db.execAsync(MIGRATIONS[i]);
+      // Bump the version INSIDE the same transaction so the schema change and
+      // the version bump commit (or roll back) atomically. If this ran after
+      // the transaction, a crash in between would re-run the migration and
+      // fatally fail (e.g. "duplicate column"). PRAGMA can't be parameterized;
+      // i + 1 is a trusted loop integer.
+      await db.execAsync(`PRAGMA user_version = ${i + 1}`);
     });
     version = i + 1;
-    // PRAGMA can't be parameterized; version is a trusted loop integer.
-    await db.execAsync(`PRAGMA user_version = ${version}`);
   }
 
   await seedReminderMessages(db);

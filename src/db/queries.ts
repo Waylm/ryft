@@ -1,5 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
 import type {
+  AdherenceRow,
   Checklist,
   ChecklistItem,
   ChecklistKind,
@@ -10,9 +11,11 @@ import type {
   FocusIntensity,
   Metric,
   MetricStat,
+  OutputStat,
   Photo,
   Reminder,
   ReminderMessage,
+  StreakStats,
   TemplateItem,
   TemplateItemType,
   TextSection,
@@ -240,46 +243,138 @@ export async function countDays(db: SQLiteDatabase): Promise<number> {
   return row?.c ?? 0;
 }
 
+const ACTIVITY_SELECT = `SELECT d.date AS date,
+   ( (SELECT COUNT(*) FROM checklist_items ci JOIN checklists c ON c.id = ci.checklist_id WHERE c.day_id = d.id AND ci.done = 1)
+   + (SELECT COUNT(*) FROM metrics m WHERE m.day_id = d.id)
+   + (SELECT COUNT(*) FROM text_sections t WHERE t.day_id = d.id AND TRIM(t.content) <> '')
+   + (SELECT COUNT(*) FROM focus_areas fa JOIN focus_blocks fb ON fb.id = fa.focus_block_id WHERE fb.day_id = d.id)
+   + (SELECT COUNT(*) FROM photos p WHERE p.day_id = d.id)
+   + (CASE WHEN TRIM(COALESCE(d.note, '')) <> '' THEN 1 ELSE 0 END)
+   ) AS activity
+ FROM days d`;
+
+const toLocalDate = (iso: string): Date => {
+  const [y, m, dd] = iso.split('-').map(Number);
+  return new Date(y, m - 1, dd);
+};
+const isoOfDate = (d: Date): string =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
 /**
- * Current consecutive-day grind streak. A day counts if it has any real
- * activity (done checklist item, metric, filled section, photo, or note).
- * The streak may end today or yesterday (so it survives an as-yet-empty today).
+ * Consistency stats. A day counts if it has any real activity (done checklist
+ * item, metric, filled section, focus area, photo, or note). `current` may end
+ * today or yesterday; `longest` is the all-time longest consecutive run.
  */
-export async function getStreak(db: SQLiteDatabase, todayIso: string): Promise<number> {
-  const rows = await db.getAllAsync<{ date: string; activity: number }>(
-    `SELECT d.date AS date,
-       ( (SELECT COUNT(*) FROM checklist_items ci JOIN checklists c ON c.id = ci.checklist_id WHERE c.day_id = d.id AND ci.done = 1)
-       + (SELECT COUNT(*) FROM metrics m WHERE m.day_id = d.id)
-       + (SELECT COUNT(*) FROM text_sections t WHERE t.day_id = d.id AND TRIM(t.content) <> '')
-       + (SELECT COUNT(*) FROM focus_areas fa JOIN focus_blocks fb ON fb.id = fa.focus_block_id WHERE fb.day_id = d.id)
-       + (SELECT COUNT(*) FROM photos p WHERE p.day_id = d.id)
-       + (CASE WHEN TRIM(COALESCE(d.note, '')) <> '' THEN 1 ELSE 0 END)
-       ) AS activity
-     FROM days d
-     ORDER BY d.date DESC`
-  );
-  const active = new Set(rows.filter((r) => r.activity > 0).map((r) => r.date));
-  if (active.size === 0) return 0;
+export async function getStreakStats(
+  db: SQLiteDatabase,
+  todayIso: string
+): Promise<StreakStats> {
+  const rows = await db.getAllAsync<{ date: string; activity: number }>(ACTIVITY_SELECT);
+  const activeDates = rows
+    .filter((r) => r.activity > 0)
+    .map((r) => r.date)
+    .sort(); // YYYY-MM-DD sorts chronologically
+  const active = new Set(activeDates);
+  const activeDayCount = active.size;
 
   const oneDay = 86_400_000;
-  const [y, m, dd] = todayIso.split('-').map(Number);
-  let cursor = new Date(y, m - 1, dd);
-  const iso = (d: Date) =>
-    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
-      d.getDate()
-    ).padStart(2, '0')}`;
 
-  // Allow the streak to "start" at yesterday if today isn't logged yet.
-  if (!active.has(iso(cursor))) {
-    cursor = new Date(cursor.getTime() - oneDay);
-    if (!active.has(iso(cursor))) return 0;
+  // current — walk back from today (or yesterday if today isn't logged yet)
+  let current = 0;
+  if (activeDayCount > 0) {
+    let cursor = toLocalDate(todayIso);
+    if (!active.has(isoOfDate(cursor))) cursor = new Date(cursor.getTime() - oneDay);
+    while (active.has(isoOfDate(cursor))) {
+      current++;
+      cursor = new Date(cursor.getTime() - oneDay);
+    }
   }
-  let streak = 0;
-  while (active.has(iso(cursor))) {
-    streak++;
-    cursor = new Date(cursor.getTime() - oneDay);
+
+  // longest — single pass over the ascending active dates
+  let longest = 0;
+  let run = 0;
+  let longestEndDate: string | null = null;
+  let prev: string | null = null;
+  for (const d of activeDates) {
+    const adjacent =
+      prev !== null &&
+      Math.round((toLocalDate(d).getTime() - toLocalDate(prev).getTime()) / oneDay) === 1;
+    run = adjacent ? run + 1 : 1;
+    if (run > longest) {
+      longest = run;
+      longestEndDate = d;
+    }
+    prev = d;
   }
-  return streak;
+
+  return { current, longest, longestEndDate, activeDayCount };
+}
+
+/** Current consecutive-day grind streak (thin wrapper over getStreakStats). */
+export async function getStreak(db: SQLiteDatabase, todayIso: string): Promise<number> {
+  return (await getStreakStats(db, todayIso)).current;
+}
+
+/**
+ * Daily-output stats. Uses the SAME executedCount formula as listDaySummaries
+ * (checklist done + filled sections + focus areas + metrics — note: excludes
+ * photos/note, unlike the streak activity set). Peak is your best single day;
+ * recent average is over the up-to-7 most recent days that had any output.
+ */
+export async function getOutputStat(db: SQLiteDatabase): Promise<OutputStat> {
+  const rows = await db.getAllAsync<{ date: string; executed: number }>(
+    `SELECT d.date AS date,
+       ( (SELECT COUNT(*) FROM checklist_items ci JOIN checklists c ON c.id = ci.checklist_id WHERE c.day_id = d.id AND ci.done = 1)
+       + (SELECT COUNT(*) FROM text_sections t WHERE t.day_id = d.id AND TRIM(t.content) <> '')
+       + (SELECT COUNT(*) FROM focus_areas fa JOIN focus_blocks fb ON fb.id = fa.focus_block_id WHERE fb.day_id = d.id)
+       + (SELECT COUNT(*) FROM metrics m WHERE m.day_id = d.id)
+       ) AS executed
+     FROM days d
+     ORDER BY d.date ASC`
+  );
+  const outputDays = rows.filter((r) => r.executed > 0);
+
+  let peak = 0;
+  let peakDate: string | null = null;
+  for (const r of outputDays) {
+    if (r.executed > peak) {
+      peak = r.executed;
+      peakDate = r.date;
+    }
+  }
+  const recent = outputDays.slice(-7);
+  const recentAvg = recent.length
+    ? recent.reduce((s, r) => s + r.executed, 0) / recent.length
+    : 0;
+  const last = outputDays.length ? outputDays[outputDays.length - 1] : null;
+
+  return {
+    peak,
+    peakDate,
+    recentAvg,
+    recentDays: recent.length,
+    mostRecentExecuted: last ? last.executed : 0,
+    mostRecentDate: last ? last.date : null,
+    outputDayCount: outputDays.length,
+  };
+}
+
+/**
+ * Per-day checklist follow-through, restricted to check-kind checklists. The
+ * seeded Executed list is kind='list' (items always done=0) and is correctly
+ * excluded so it can't poison the completion rate.
+ */
+export async function getAdherenceRows(db: SQLiteDatabase): Promise<AdherenceRow[]> {
+  return db.getAllAsync<AdherenceRow>(
+    `SELECT d.date AS date,
+       SUM(CASE WHEN ci.done = 1 THEN 1 ELSE 0 END) AS done,
+       COUNT(*) AS total
+     FROM checklist_items ci
+     JOIN checklists c ON c.id = ci.checklist_id AND c.kind = 'check'
+     JOIN days d ON d.id = c.day_id
+     GROUP BY d.date
+     ORDER BY d.date ASC`
+  );
 }
 
 // ---------------------------------------------------------------------------

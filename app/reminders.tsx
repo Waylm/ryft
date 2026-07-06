@@ -105,8 +105,8 @@ export default function RemindersScreen() {
   };
 
   const addLine = async (text: string) => {
-    await addReminderMessage(db, text);
     setAddLineOpen(false);
+    await addReminderMessage(db, text);
     load();
   };
 

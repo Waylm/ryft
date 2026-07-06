@@ -1,0 +1,47 @@
+name: EAS Build
+
+# Kicks off a native build on EAS. Triggered by pushing a version tag (v*) or
+# run manually from the Actions tab. Requires the repo secret EXPO_TOKEN.
+#
+# Store submission is separate: run `eas submit -p ios|android --latest` locally
+# once you have store credentials, or add a submit step here later.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform to build (all | ios | android)
+        default: all
+        required: true
+      profile:
+        description: Build profile (production | preview)
+        default: production
+        required: true
+
+jobs:
+  build:
+    name: Build ${{ github.event.inputs.platform || 'all' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build on EAS
+        run: |
+          eas build \
+            --platform ${{ github.event.inputs.platform || 'all' }} \
+            --profile ${{ github.event.inputs.profile || 'production' }} \
+            --non-interactive --no-wait
