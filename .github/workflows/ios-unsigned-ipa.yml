@@ -1,0 +1,77 @@
+name: iOS Unsigned IPA
+
+# Builds an UNSIGNED Ryft.ipa on a macOS runner with code signing disabled, then
+# uploads it as a build artifact. No Apple account, no certificates, no secrets.
+#
+# The resulting .ipa will NOT install on a stock iPhone as-is — it has no
+# signature. Sign it at install time with a free Apple ID using Sideloadly
+# (https://sideloadly.io) or AltStore (https://altstore.io). Those tools re-sign
+# the unsigned payload on your machine, so the only Apple login happens there,
+# on install — never in this build.
+#
+# Run it: Actions tab -> "iOS Unsigned IPA" -> Run workflow. Download the
+# "Ryft-unsigned-ipa" artifact when it's green (~15-20 min).
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build unsigned IPA
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Show toolchain
+        run: xcodebuild -version
+
+      # Generates the native ios/ project from app.json + config plugins and
+      # installs CocoaPods. --clean ensures a fresh, reproducible project.
+      - name: Prebuild iOS project
+        run: npx expo prebuild --platform ios --clean
+
+      # Archive with all signing turned off. This compiles the app but skips
+      # certificate/provisioning-profile requirements entirely.
+      - name: Archive (signing disabled)
+        run: |
+          WORKSPACE=$(ls -d ios/*.xcworkspace | head -n1)
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+          echo "Workspace: $WORKSPACE  Scheme: $SCHEME"
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Ryft.xcarchive" \
+            archive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            DEVELOPMENT_TEAM=""
+
+      # Repackage the built .app into the Payload/ layout Apple expects and zip
+      # it as a .ipa. An .ipa is literally a zip of Payload/YourApp.app.
+      - name: Package unsigned .ipa
+        run: |
+          APP=$(ls -d "$RUNNER_TEMP"/Ryft.xcarchive/Products/Applications/*.app | head -n1)
+          echo "App bundle: $APP"
+          mkdir -p "$RUNNER_TEMP/Payload"
+          cp -R "$APP" "$RUNNER_TEMP/Payload/"
+          ( cd "$RUNNER_TEMP" && zip -qry Ryft-unsigned.ipa Payload )
+          ls -lh "$RUNNER_TEMP/Ryft-unsigned.ipa"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Ryft-unsigned-ipa
+          path: ${{ runner.temp }}/Ryft-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
