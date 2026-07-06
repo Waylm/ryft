@@ -1,0 +1,54 @@
+{
+  "expo": {
+    "name": "Ryft",
+    "slug": "ryft",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "ryft",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "backgroundColor": "#0E0E0E",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ryft.app"
+    },
+    "android": {
+      "package": "com.ryft.app",
+      "edgeToEdgeEnabled": true
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-sqlite",
+      [
+        "expo-notifications",
+        {
+          "color": "#FFFFFF"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Ryft needs access to your photos to attach progress pics to your journal.",
+          "cameraPermission": "Ryft needs your camera to capture today's grind."
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#0E0E0E",
+          "dark": {
+            "backgroundColor": "#0E0E0E"
+          }
+        }
+      ],
+      "expo-font"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
