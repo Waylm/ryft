@@ -9,18 +9,19 @@ import { PromptModal } from '@/components/PromptModal';
 import { Spine } from '@/components/Spine';
 import { ChecklistBlock } from '@/components/day/ChecklistBlock';
 import { TextSectionBlock } from '@/components/day/TextSectionBlock';
+import { FocusBlock } from '@/components/day/FocusBlock';
 import { MetricsBlock } from '@/components/day/MetricsBlock';
 import { PhotosBlock } from '@/components/day/PhotosBlock';
 import { useTheme } from '@/theme';
 import { useDayData } from '@/hooks/useDayData';
-import { addChecklist, addTextSection, deleteDay, updateDayFields } from '@/db/queries';
+import { addChecklist, addFocusBlock, addTextSection, deleteDay, updateDayFields } from '@/db/queries';
 import { buildDaySpine, dayOverallStatus } from '@/lib/status';
 import type { DaySummary } from '@/db/types';
 import { todayISO, weekdayLong, formatSlashDate, isToday, relativeLabel } from '@/lib/date';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-type AddKind = 'checklist' | 'text' | null;
+type AddKind = 'checklist' | 'text' | 'focus' | null;
 
 export default function DayScreen() {
   const theme = useTheme();
@@ -31,7 +32,7 @@ export default function DayScreen() {
   const date = DATE_RE.test(params.date ?? '') ? params.date : todayISO();
 
   const data = useDayData(date);
-  const { db, day, checklists, sections, metrics, photos } = data;
+  const { db, day, checklists, sections, focusBlocks, metrics, photos } = data;
 
   const [note, setNote] = useState('');
   const noteDirty = useRef(false);
@@ -77,22 +78,27 @@ export default function DayScreen() {
     if (!day) return;
     if (addKind === 'checklist') await addChecklist(db, day.id, label);
     else if (addKind === 'text') await addTextSection(db, day.id, label);
+    else if (addKind === 'focus') await addFocusBlock(db, day.id, label);
     setAddKind(null);
     data.reload();
   };
 
-  const spineSegments = buildDaySpine({ checklists, sections, metrics, photos });
+  const spineSegments = buildDaySpine({ checklists, sections, focusBlocks, metrics, photos });
 
   // Build a lightweight summary just for the status pill.
+  const sectionCount = sections.filter((s) => s.content.trim()).length;
+  const focusCount = focusBlocks.reduce((n, f) => n + f.areas.length, 0);
+  const checklistDone = checklists.reduce((n, c) => n + c.items.filter((i) => i.done).length, 0);
   const pillStatus = day
     ? dayOverallStatus({
         ...day,
-        sectionCount: sections.filter((s) => s.content.trim()).length,
+        sectionCount,
         metricCount: metrics.length,
         photoCount: photos.length,
+        focusCount,
         checklistTotal: checklists.reduce((n, c) => n + c.items.length, 0),
-        checklistDone: checklists.reduce((n, c) => n + c.items.filter((i) => i.done).length, 0),
-        executedCount: 0,
+        checklistDone,
+        executedCount: checklistDone + sectionCount + metrics.length + focusCount,
       } as DaySummary)
     : 'skip';
 
@@ -183,6 +189,9 @@ export default function DayScreen() {
             {sections.map((s) => (
               <TextSectionBlock key={`s${s.id}`} section={s} db={db} onChange={data.reload} />
             ))}
+            {focusBlocks.map((f) => (
+              <FocusBlock key={`f${f.id}`} block={f} db={db} onChange={data.reload} />
+            ))}
             {day ? (
               <MetricsBlock dayId={day.id} metrics={metrics} db={db} onChange={data.reload} />
             ) : null}
@@ -203,13 +212,26 @@ export default function DayScreen() {
         >
           <AddChip icon="check-square" label="Checklist" onPress={() => setAddKind('checklist')} />
           <AddChip icon="align-left" label="Text" onPress={() => setAddKind('text')} />
+          <AddChip icon="target" label="Focus" onPress={() => setAddKind('focus')} />
         </View>
       </ScrollView>
 
       <PromptModal
         visible={addKind !== null}
-        title={addKind === 'checklist' ? 'New checklist' : 'New text section'}
-        placeholder={addKind === 'checklist' ? 'Skincare, Morning routine…' : 'Ideas, Executed…'}
+        title={
+          addKind === 'checklist'
+            ? 'New checklist'
+            : addKind === 'focus'
+              ? 'New focus'
+              : 'New text section'
+        }
+        placeholder={
+          addKind === 'checklist'
+            ? 'Skincare, Morning routine…'
+            : addKind === 'focus'
+              ? 'Workout, Study…'
+              : 'Ideas, Executed…'
+        }
         onSubmit={submitAdd}
         onClose={() => setAddKind(null)}
       />

@@ -34,6 +34,25 @@ export interface Checklist {
   items: ChecklistItem[];
 }
 
+/** Intensity a focus area got that day: 1 = light, 2 = solid, 3 = heavy. */
+export type FocusIntensity = 1 | 2 | 3;
+
+export interface FocusArea {
+  id: number;
+  focusBlockId: number;
+  label: string;
+  intensity: FocusIntensity;
+  position: number;
+}
+
+export interface FocusBlock {
+  id: number;
+  dayId: number;
+  label: string;
+  position: number;
+  areas: FocusArea[];
+}
+
 export interface Metric {
   id: number;
   dayId: number;
@@ -74,9 +93,10 @@ export interface DaySummary extends Day {
   sectionCount: number;
   metricCount: number;
   photoCount: number;
+  focusCount: number;
   checklistTotal: number;
   checklistDone: number;
-  executedCount: number; // items done + filled sections + logged metrics — a rough "did work" signal
+  executedCount: number; // items done + filled sections + focus areas + metrics — a rough "did work" signal
 }
 
 /** Aggregated stats for one metric key across all time — powers the prime comparison. */

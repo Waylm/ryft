@@ -1,4 +1,4 @@
-import type { Checklist, DaySummary, Metric, Photo, TextSection } from '@/db/types';
+import type { Checklist, DaySummary, FocusBlock, Metric, Photo, TextSection } from '@/db/types';
 
 export type SegStatus = 'done' | 'partial' | 'skip';
 
@@ -31,9 +31,15 @@ export function checklistStatus(c: Checklist): SegStatus {
  * Build the vertical spine segments for a day-detail view from its real blocks,
  * mirroring journal-d1.html's [Skincare, Ideas, Executed, Workout] spine.
  */
+export function focusStatus(f: FocusBlock): SegStatus {
+  if (f.areas.length === 0) return 'skip';
+  return 'done';
+}
+
 export function buildDaySpine(input: {
   checklists: Checklist[];
   sections: TextSection[];
+  focusBlocks: FocusBlock[];
   metrics: Metric[];
   photos: Photo[];
 }): Segment[] {
@@ -46,6 +52,9 @@ export function buildDaySpine(input: {
       status: s.content.trim().length > 0 ? 'done' : 'skip',
       label: s.label,
     });
+  }
+  for (const f of input.focusBlocks) {
+    segments.push({ status: focusStatus(f), label: f.label });
   }
   if (input.metrics.length > 0) {
     segments.push({ status: 'done', label: 'Metrics' });
@@ -67,6 +76,7 @@ export function summarySegments(d: DaySummary): Segment[] {
     });
   }
   segs.push({ status: d.sectionCount > 0 ? 'done' : 'skip', label: 'notes' });
+  if (d.focusCount > 0) segs.push({ status: 'done', label: 'focus' });
   segs.push({ status: d.metricCount > 0 ? 'done' : 'skip', label: 'metrics' });
   if (d.photoCount > 0) segs.push({ status: 'done', label: 'photos' });
   return segs;
@@ -77,6 +87,7 @@ export function summaryLine(d: DaySummary): string {
   const parts: string[] = [];
   if (d.checklistTotal > 0) parts.push(`${d.checklistDone}/${d.checklistTotal} done`);
   if (d.sectionCount > 0) parts.push(`${d.sectionCount} note${d.sectionCount > 1 ? 's' : ''}`);
+  if (d.focusCount > 0) parts.push(`${d.focusCount} focus`);
   if (d.metricCount > 0) parts.push(`${d.metricCount} metric${d.metricCount > 1 ? 's' : ''}`);
   if (d.photoCount > 0) parts.push(`${d.photoCount} photo${d.photoCount > 1 ? 's' : ''}`);
   if (parts.length === 0) return 'rest day — nothing logged';

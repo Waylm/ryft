@@ -4,6 +4,9 @@ import type {
   ChecklistItem,
   Day,
   DaySummary,
+  FocusArea,
+  FocusBlock,
+  FocusIntensity,
   Metric,
   MetricStat,
   Photo,
@@ -11,6 +14,7 @@ import type {
   ReminderMessage,
   TextSection,
 } from './types';
+import { DEFAULT_DAY_TEMPLATE } from './database';
 
 const now = () => Date.now();
 
@@ -74,7 +78,10 @@ export async function getDayById(db: SQLiteDatabase, id: number): Promise<Day | 
   return row ? mapDay(row) : null;
 }
 
-/** Fetch the day for a date, creating an empty record if none exists yet. */
+/**
+ * Fetch the day for a date, creating it (seeded with the default template)
+ * if none exists yet.
+ */
 export async function getOrCreateDay(db: SQLiteDatabase, date: string): Promise<Day> {
   const existing = await getDayByDate(db, date);
   if (existing) return existing;
@@ -85,9 +92,43 @@ export async function getOrCreateDay(db: SQLiteDatabase, date: string): Promise<
     t,
     t
   );
-  const created = await getDayById(db, res.lastInsertRowId);
+  const dayId = res.lastInsertRowId;
+  await seedDefaultBlocks(db, dayId);
+  const created = await getDayById(db, dayId);
   if (!created) throw new Error('Failed to create day');
   return created;
+}
+
+/** Populate a freshly created day with the default template blocks. */
+async function seedDefaultBlocks(db: SQLiteDatabase, dayId: number): Promise<void> {
+  let pos = 0;
+  for (const label of DEFAULT_DAY_TEMPLATE.checklists) {
+    await db.runAsync(
+      'INSERT INTO checklists (day_id, label, position) VALUES (?, ?, ?)',
+      dayId,
+      label,
+      pos++
+    );
+  }
+  pos = 0;
+  for (const label of DEFAULT_DAY_TEMPLATE.sections) {
+    await db.runAsync(
+      'INSERT INTO text_sections (day_id, label, content, position) VALUES (?, ?, ?, ?)',
+      dayId,
+      label,
+      '',
+      pos++
+    );
+  }
+  pos = 0;
+  for (const label of DEFAULT_DAY_TEMPLATE.focus) {
+    await db.runAsync(
+      'INSERT INTO focus_blocks (day_id, label, position) VALUES (?, ?, ?)',
+      dayId,
+      label,
+      pos++
+    );
+  }
 }
 
 export async function touchDay(db: SQLiteDatabase, id: number): Promise<void> {
@@ -135,6 +176,7 @@ export async function listDaySummaries(
       section_count: number;
       metric_count: number;
       photo_count: number;
+      focus_count: number;
       checklist_total: number;
       checklist_done: number;
     }
@@ -143,6 +185,7 @@ export async function listDaySummaries(
        (SELECT COUNT(*) FROM text_sections t WHERE t.day_id = d.id AND TRIM(t.content) <> '') AS section_count,
        (SELECT COUNT(*) FROM metrics m WHERE m.day_id = d.id) AS metric_count,
        (SELECT COUNT(*) FROM photos p WHERE p.day_id = d.id) AS photo_count,
+       (SELECT COUNT(*) FROM focus_areas fa JOIN focus_blocks fb ON fb.id = fa.focus_block_id WHERE fb.day_id = d.id) AS focus_count,
        (SELECT COUNT(*) FROM checklist_items ci JOIN checklists c ON c.id = ci.checklist_id WHERE c.day_id = d.id) AS checklist_total,
        (SELECT COUNT(*) FROM checklist_items ci JOIN checklists c ON c.id = ci.checklist_id WHERE c.day_id = d.id AND ci.done = 1) AS checklist_done
      FROM days d
@@ -156,9 +199,10 @@ export async function listDaySummaries(
     sectionCount: r.section_count,
     metricCount: r.metric_count,
     photoCount: r.photo_count,
+    focusCount: r.focus_count,
     checklistTotal: r.checklist_total,
     checklistDone: r.checklist_done,
-    executedCount: r.checklist_done + r.section_count + r.metric_count,
+    executedCount: r.checklist_done + r.section_count + r.metric_count + r.focus_count,
   }));
 }
 
@@ -185,6 +229,7 @@ export async function getStreak(db: SQLiteDatabase, todayIso: string): Promise<n
        ( (SELECT COUNT(*) FROM checklist_items ci JOIN checklists c ON c.id = ci.checklist_id WHERE c.day_id = d.id AND ci.done = 1)
        + (SELECT COUNT(*) FROM metrics m WHERE m.day_id = d.id)
        + (SELECT COUNT(*) FROM text_sections t WHERE t.day_id = d.id AND TRIM(t.content) <> '')
+       + (SELECT COUNT(*) FROM focus_areas fa JOIN focus_blocks fb ON fb.id = fa.focus_block_id WHERE fb.day_id = d.id)
        + (SELECT COUNT(*) FROM photos p WHERE p.day_id = d.id)
        + (CASE WHEN TRIM(COALESCE(d.note, '')) <> '' THEN 1 ELSE 0 END)
        ) AS activity
@@ -388,6 +433,126 @@ export async function updateChecklistItem(
 
 export async function deleteChecklistItem(db: SQLiteDatabase, id: number): Promise<void> {
   await db.runAsync('DELETE FROM checklist_items WHERE id = ?', id);
+}
+
+// ---------------------------------------------------------------------------
+// Focus blocks
+// ---------------------------------------------------------------------------
+
+export async function listFocusBlocks(db: SQLiteDatabase, dayId: number): Promise<FocusBlock[]> {
+  const blocks = await db.getAllAsync<{
+    id: number;
+    day_id: number;
+    label: string;
+    position: number;
+  }>('SELECT * FROM focus_blocks WHERE day_id = ? ORDER BY position, id', dayId);
+  if (blocks.length === 0) return [];
+  const ids = blocks.map((b) => b.id);
+  const placeholders = ids.map(() => '?').join(',');
+  const areas = await db.getAllAsync<{
+    id: number;
+    focus_block_id: number;
+    label: string;
+    intensity: number;
+    position: number;
+  }>(
+    `SELECT * FROM focus_areas WHERE focus_block_id IN (${placeholders}) ORDER BY position, id`,
+    ...ids
+  );
+  const byBlock = new Map<number, FocusArea[]>();
+  for (const a of areas) {
+    const arr = byBlock.get(a.focus_block_id) ?? [];
+    arr.push({
+      id: a.id,
+      focusBlockId: a.focus_block_id,
+      label: a.label,
+      intensity: clampIntensity(a.intensity),
+      position: a.position,
+    });
+    byBlock.set(a.focus_block_id, arr);
+  }
+  return blocks.map((b) => ({
+    id: b.id,
+    dayId: b.day_id,
+    label: b.label,
+    position: b.position,
+    areas: byBlock.get(b.id) ?? [],
+  }));
+}
+
+export async function addFocusBlock(
+  db: SQLiteDatabase,
+  dayId: number,
+  label: string
+): Promise<number> {
+  const pos = await nextPosition(db, 'focus_blocks', dayId);
+  const res = await db.runAsync(
+    'INSERT INTO focus_blocks (day_id, label, position) VALUES (?, ?, ?)',
+    dayId,
+    label,
+    pos
+  );
+  await touchDay(db, dayId);
+  return res.lastInsertRowId;
+}
+
+export async function updateFocusBlock(
+  db: SQLiteDatabase,
+  id: number,
+  label: string
+): Promise<void> {
+  await db.runAsync('UPDATE focus_blocks SET label = ? WHERE id = ?', label, id);
+}
+
+export async function deleteFocusBlock(db: SQLiteDatabase, id: number): Promise<void> {
+  await db.runAsync('DELETE FROM focus_blocks WHERE id = ?', id);
+}
+
+export async function addFocusArea(
+  db: SQLiteDatabase,
+  focusBlockId: number,
+  label: string,
+  intensity: FocusIntensity = 2
+): Promise<number> {
+  const row = await db.getFirstAsync<{ p: number | null }>(
+    'SELECT MAX(position) AS p FROM focus_areas WHERE focus_block_id = ?',
+    focusBlockId
+  );
+  const pos = (row?.p ?? -1) + 1;
+  const res = await db.runAsync(
+    'INSERT INTO focus_areas (focus_block_id, label, intensity, position) VALUES (?, ?, ?, ?)',
+    focusBlockId,
+    label,
+    intensity,
+    pos
+  );
+  return res.lastInsertRowId;
+}
+
+export async function setFocusIntensity(
+  db: SQLiteDatabase,
+  id: number,
+  intensity: FocusIntensity
+): Promise<void> {
+  await db.runAsync('UPDATE focus_areas SET intensity = ? WHERE id = ?', intensity, id);
+}
+
+export async function updateFocusArea(
+  db: SQLiteDatabase,
+  id: number,
+  label: string
+): Promise<void> {
+  await db.runAsync('UPDATE focus_areas SET label = ? WHERE id = ?', label, id);
+}
+
+export async function deleteFocusArea(db: SQLiteDatabase, id: number): Promise<void> {
+  await db.runAsync('DELETE FROM focus_areas WHERE id = ?', id);
+}
+
+function clampIntensity(n: number): FocusIntensity {
+  if (n <= 1) return 1;
+  if (n >= 3) return 3;
+  return 2;
 }
 
 // ---------------------------------------------------------------------------
@@ -741,7 +906,7 @@ export async function deleteReminderMessage(db: SQLiteDatabase, id: number): Pro
 
 async function nextPosition(
   db: SQLiteDatabase,
-  table: 'text_sections' | 'checklists' | 'metrics' | 'photos',
+  table: 'text_sections' | 'checklists' | 'metrics' | 'photos' | 'focus_blocks',
   dayId: number
 ): Promise<number> {
   const row = await db.getFirstAsync<{ p: number | null }>(

@@ -92,7 +92,35 @@ const MIGRATIONS: string[] = [
     is_custom INTEGER NOT NULL DEFAULT 0
   );
   `,
+  // v2 — focus blocks (e.g. Workout → Shoulders/Legs with an intensity)
+  `
+  CREATE TABLE focus_blocks (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    day_id   INTEGER NOT NULL REFERENCES days(id) ON DELETE CASCADE,
+    label    TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE TABLE focus_areas (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    focus_block_id INTEGER NOT NULL REFERENCES focus_blocks(id) ON DELETE CASCADE,
+    label          TEXT NOT NULL,
+    intensity      INTEGER NOT NULL DEFAULT 2,
+    position       INTEGER NOT NULL DEFAULT 0
+  );
+  `,
 ];
+
+/**
+ * The default day skeleton, mirroring journal-d1.html: a skincare checklist,
+ * Ideas + Executed text sections, and a Workout focus block. Seeded on the
+ * first open of a new day so pages feel complete out of the box.
+ */
+export const DEFAULT_DAY_TEMPLATE = {
+  checklists: ['Skincare'],
+  sections: ['Ideas', 'Executed'],
+  focus: ['Workout'],
+} as const;
 
 /** The "prime hood" starter pack — hard-hitting lines that ship with the app. */
 export const DEFAULT_REMINDER_MESSAGES = [
